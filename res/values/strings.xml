@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="hello">Hello World, MainActivity!</string>
+    <string name="app_name">RadioLight</string>
+    <string name="svet">свет</string>
+    <string name="svoboda">свобода</string>
+    <string name="mir">мир</string>
+    <string name="light">light</string>
+    <string name="freedom">freedom</string>
+    <string name="world">world</string>
+    <string name="divider">//</string>
+
+</resources>
