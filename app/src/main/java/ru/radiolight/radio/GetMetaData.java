@@ -16,7 +16,7 @@ public final class GetMetaData {
 
     static String getMeta(String url) throws IOException{
         Log.i(GetMetaData.class.getName(), url);
-        String bodyText = "";
+        String bodyText;
         int currentApiVersion = android.os.Build.VERSION.SDK_INT;
         Log.i(GetMetaData.class.getName(), "SDK: " + currentApiVersion);
         if (currentApiVersion < android.os.Build.VERSION_CODES.KITKAT){
@@ -39,7 +39,7 @@ public final class GetMetaData {
         //Spoof the connection so we look like a web browser
         spoof.setRequestProperty( "User-Agent", "Mozilla/4.0 (compatible; MSIE 5.5; Windows NT 5.0; H010818)" );
         BufferedReader in = new BufferedReader(new InputStreamReader(spoof.getInputStream()));
-        String strLine = "";
+        String strLine;
         String finalHTML = "";
         //Loop through every line in the source
         while ((strLine = in.readLine()) != null){

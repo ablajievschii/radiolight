@@ -3,7 +3,6 @@ package ru.radiolight.radio;
 import java.io.IOException;
 
 import android.app.Notification;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -15,26 +14,25 @@ import android.media.MediaPlayer.OnBufferingUpdateListener;
 import android.media.MediaPlayer.OnErrorListener;
 import android.media.MediaPlayer.OnInfoListener;
 import android.media.MediaPlayer.OnPreparedListener;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.os.Binder;
 import android.os.IBinder;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.Parcelable;
 import android.os.PowerManager;
+import android.os.RemoteException;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.util.Log;
-import android.widget.Toast;
 
 public class RadioService extends Service implements OnInfoListener,
         OnAudioFocusChangeListener, OnErrorListener {
 
     final static String TAG = "RL_RadioService";
-    private MediaPlayer player;// player1, player2, player3;
+    private MediaPlayer player;
 //	 "http://94.25.53.133/nashe-128.mp3" 
 
     protected static final int TIMER_LIMIT = 12;
-
-    final static String SERVICE_STOPED = "service_stoped";
 
     final static String UPDATE = "updating";
     static boolean IS_PLAYING = false;
@@ -42,15 +40,12 @@ public class RadioService extends Service implements OnInfoListener,
     String mArtistTitle = "-";
 
     static int stream = -1;
-    private int result;
     private int timer = 0;
-    private AudioManager audioManager;
     private TelephonyManager tm;
-    private Context context;
+    private Context mContext;
 
     MyBinder binder = new MyBinder();
-
-//	private Handler mHandler;
+    private Messenger mActivityMessenger;
 
     static final int NOTIFICATION_ID = 1;
 
@@ -73,7 +68,7 @@ public class RadioService extends Service implements OnInfoListener,
     @Override
     public void onCreate() {
         super.onCreate();
-        context = getApplicationContext();
+        mContext = getApplicationContext();
         tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
         tm.listen(mPhoneListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
@@ -82,6 +77,8 @@ public class RadioService extends Service implements OnInfoListener,
     public int onStartCommand(Intent intent, int flags, int startId) {
      // Notification starts
         initNotification();
+
+        mActivityMessenger = intent.getParcelableExtra(Constants.ACTIVITY_MESSENGER);
 
         stream = intent.getFlags();
         Log.i(TAG, "onStart , stream = " + stream);
@@ -133,8 +130,8 @@ public class RadioService extends Service implements OnInfoListener,
 //          , 0, notificationIntent, PendingIntent.FLAG_CANCEL_CURRENT));
 //
 //
-        PendingIntent contentIntent = PendingIntent.getActivity(context, 0, notificationIntent, 0);
-        notification.setLatestEventInfo(context, contentTitle, contentText,
+        PendingIntent contentIntent = PendingIntent.getActivity(mContext, 0, notificationIntent, 0);
+        notification.setLatestEventInfo(mContext, contentTitle, contentText,
             contentIntent);
 
         startForeground(NOTIFICATION_ID, notification);
@@ -154,35 +151,33 @@ public class RadioService extends Service implements OnInfoListener,
         Log.i(TAG, "creating player, stream = " + stream);
         if (player != null) {
             player = null;
-}
+        }
         player = new MediaPlayer();
-        player.setWakeMode(getApplicationContext(),
-               PowerManager.PARTIAL_WAKE_LOCK);
+        player.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
         player.setAudioStreamType(AudioManager.STREAM_MUSIC);
-		// ////////////////////////////
-		// ////////////////////////////
+        // ////////////////////////////
 
-		try {
-			switch (stream) {
-			case RadioActivity.SVET:
-				Log.i(TAG, "Started Svet : ");
-				// The url to the shoutcast stream
-				player.setDataSource(Constants.URL_SVET);
-				URL_PLAYING = Constants.URL_SVET;
-				break;
-			case RadioActivity.SVOBODA:
-				Log.i(TAG, "Started Svoboda : ");
-				// The url to the shoutcast stream
-				player.setDataSource(Constants.URL_SVOBODA);
-				URL_PLAYING = Constants.URL_SVOBODA;
-				break;
-			case RadioActivity.MIR:
-				Log.i(TAG, "Started Mir : ");
-				// The url to the shoutcast stream
-				player.setDataSource(Constants.URL_MIR);
-				URL_PLAYING = Constants.URL_MIR;
-				break;
-			}
+        try {
+            switch (stream) {
+            case RadioActivity.SVET:
+                Log.i(TAG, "Started Svet : ");
+                // The url to the shoutcast stream
+                player.setDataSource(Constants.URL_SVET);
+                URL_PLAYING = Constants.URL_SVET;
+                break;
+            case RadioActivity.SVOBODA:
+                Log.i(TAG, "Started Svoboda : ");
+                // The url to the shoutcast stream
+                player.setDataSource(Constants.URL_SVOBODA);
+                URL_PLAYING = Constants.URL_SVOBODA;
+                break;
+            case RadioActivity.MIR:
+                Log.i(TAG, "Started Mir : ");
+                // The url to the shoutcast stream
+                player.setDataSource(Constants.URL_MIR);
+                URL_PLAYING = Constants.URL_MIR;
+                break;
+            }
         } catch (IllegalArgumentException e) {
             Log.w(TAG, e.getMessage());
         } catch (IllegalStateException e) {
@@ -196,15 +191,19 @@ public class RadioService extends Service implements OnInfoListener,
 
         player.setOnPreparedListener(new OnPreparedListener() {
 
-            public void onPrepared(MediaPlayer mp) {
-                player.start();
+            public void onPrepared(MediaPlayer mediaPlayer) {
+                if (mediaPlayer != null){
+                    mediaPlayer.start();//player.start();
+                } else {
+                    Log.w(TAG, "Error: mediaPlayer is null");
+                }
             }
         });
 
         player.setOnBufferingUpdateListener(new OnBufferingUpdateListener() {
 
-            public void onBufferingUpdate(MediaPlayer mp, int percent) {
-//Log.i(TAG, " Player is buffering : " + percent);
+            public void onBufferingUpdate(MediaPlayer mediaPlayer, int percent) {
+                Log.i(TAG, " Player is buffering : " + percent);
                 timer++;
                 if (timer == TIMER_LIMIT) {
                     getMetaSendMsg();
@@ -225,147 +224,156 @@ public class RadioService extends Service implements OnInfoListener,
             public void run() {
                 try {
                     mArtistTitle = GetMetaData.getMeta(URL_PLAYING);
-                    sendMsgToActivity(mArtistTitle);
-                    Log.i(TAG, "CURENT RESOURCE: " + mArtistTitle);
+                    Message msg = Message.obtain(null, Constants.UPDATE_TITLE);
+                    msg.obj = mArtistTitle;
+                    mActivityMessenger.send(msg);
+//                    sendMsgToActivity(mArtistTitle);
+                    //Log.i(TAG, "CURENT RESOURCE: " + mArtistTitle);
                 } catch (IOException e) {
-                    Log.w(TAG,e.getMessage());
+                    Log.w(TAG,"getMetaSendMsg() Error: " + e.getMessage());
+                } catch (RemoteException e) {
+                    // TODO Auto-generated catch block
+                    Log.w(TAG, "Error sending message to update title: " + e.getMessage());
                 }
             }
         });
         t.start();
     }
     // ///////////////////////////////////
+    /*
     void sendMsgToActivity(String msg){
         Intent intnt = new Intent("android.intent.action.MAIN");
         intnt.putExtra("msg", msg);
         this.sendBroadcast(intnt);
-        intnt = null;
     }
+    */
 
     void startPlaying() {
         // this.stopPlaying();
-        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        result = audioManager.requestAudioFocus(this,
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        int audioFocus = audioManager.requestAudioFocus(this,
                 AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
-		if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
-			try {
-				IS_PLAYING = true;
-				player.prepareAsync();
-				player.start();
+        if (audioFocus == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+            try {
+                IS_PLAYING = true;
+                player.prepareAsync();
+                player.start();
 
-			} catch (IllegalStateException e) {
-				Log.i(TAG, "exception startPlaying()");
-				e.printStackTrace();
-			} catch (IllegalArgumentException e) {
-				e.printStackTrace();
-			}
-	}
+            } catch (IllegalStateException e) {
+                Log.i(TAG, "exception startPlaying()");
+                e.printStackTrace();
+            } catch (IllegalArgumentException e) {
+                e.printStackTrace();
+            }
+    }
 
     void stopPlaying() {
         try {
             if (!player.isPlaying()) {
-                player.reset();
-                player.release();
-                player = null;
-                Log.i(TAG, "player stoped, was not playing " + stream);
+                Log.d(TAG, "player stoped, was not playing " + stream);
                 IS_PLAYING = false;
-            } else if (player.isPlaying()) {
+            } else {
                 player.stop();
-                player.reset();
-                player.release();
-                player = null;
-                Log.i(TAG, "player stoped, was playing " + stream);
-
+                Log.d(TAG, "player stoped, was playing " + stream);
                 // initializeMediaPlayer();
                 IS_PLAYING = false;
             }
+            resetPlayer();
         } catch (IllegalStateException e) {
             Log.w(TAG, e.getMessage());
         }
+    }
+
+    private void resetPlayer(){
+        player.reset();
+        player.release();
+        player = null;
     }
 
     boolean isPlaying() {
         return IS_PLAYING;
     }
 
+   /*
+    protected String getTitle(){
+        Log.i(TAG, "getTitle() " + mArtistTitle);
+        return mArtistTitle;
+    }
+    */
+
     @Override
-	public void onAudioFocusChange(int focusChange) {
-		// if (focusChange > 0)
-		Log.i(TAG, "focusChanged = " + focusChange);
-		switch (focusChange) {
-		case AudioManager.AUDIOFOCUS_GAIN:
-			// Toast.makeText(this, "Focus gained" , Toast.LENGTH_LONG).show();
-			// resume playback
-			Log.i(TAG, "AUDIOFOCUS_GAIN");
-			if (player == null)
-				initializeMediaPlayer();
-			else if (!player.isPlaying())
-				player.start();
-			player.setVolume(1.0f, 1.0f);
-			break;
+    public void onAudioFocusChange(int focusChange) {
+        // if (focusChange > 0)
+        Log.i(TAG, "focusChanged = " + focusChange);
+        switch (focusChange) {
+        case AudioManager.AUDIOFOCUS_GAIN:
+            // Toast.makeText(this, "Focus gained" , Toast.LENGTH_LONG).show();
+            // resume playback
+            Log.d(TAG, "AUDIOFOCUS_GAIN");
+            if (player == null)
+                initializeMediaPlayer();
+            else if (!player.isPlaying())
+                player.start();
+            player.setVolume(1.0f, 1.0f);
+            break;
 
-		case AudioManager.AUDIOFOCUS_LOSS:
-			// Toast.makeText(this, "Focus lost" , Toast.LENGTH_LONG).show();
-			// Lost focus for an unbounded amount of time: stop playback and
-			// release media player
-			Log.i(TAG, "AUDIOFOCUS_LOSS");
-			break;
+        case AudioManager.AUDIOFOCUS_LOSS:
+            // Toast.makeText(this, "Focus lost" , Toast.LENGTH_LONG).show();
+            // Lost focus for an unbounded amount of time: stop playback and
+            // release media player
+            Log.d(TAG, "AUDIOFOCUS_LOSS");
+            break;
 
-		case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-			// Lost focus for a short time, but we have to stop
-			// playback. We don't release the media player because playback
-			// is likely to resume
-			Log.i(TAG, "AUDIOFOCUS_LOSS_TRANSIENT");
-			// if (player.isPlaying())
-			// player.pause();
-			break;
+        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+            // Lost focus for a short time, but we have to stop
+            // playback. We don't release the media player because playback
+            // is likely to resume
+            Log.d(TAG, "AUDIOFOCUS_LOSS_TRANSIENT");
+            break;
 
-		case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-			// Lost focus for a short time, but it's ok to keep playing
-			// at an attenuated level
-			Log.i(TAG, "AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK");
-			if (player.isPlaying())
-				player.setVolume(0.1f, 0.1f);
-			break;
-		}
+        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+            // Lost focus for a short time, but it's ok to keep playing
+            // at an attenuated level
+            Log.i(TAG, "AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK");
+            if (player.isPlaying())
+                player.setVolume(0.1f, 0.1f);
+            break;
+        }
 
-	}
+    }
 
-	// //////////////////////////////////////////////////////
-	// ������� ������
-	private PhoneStateListener mPhoneListener = new PhoneStateListener() {
-		public void onCallStateChanged(int state, String incomingNumber) {
-			try {
-				switch (state) {
-				case TelephonyManager.CALL_STATE_RINGING:
-					Log.d(TAG, "RINGING");
-					if (player.isPlaying())
-						player.pause();
-					break;
-				case TelephonyManager.CALL_STATE_OFFHOOK:
-					Log.d(TAG, "OFFHOOK");
-					if (player.isPlaying())
-						player.pause();
-					break;
-				case TelephonyManager.CALL_STATE_IDLE:
-					Log.d(TAG, "IDLE");
-					if (player == null)
-						initializeMediaPlayer();
-					else if (!player.isPlaying())
-						player.start();
-					player.setVolume(1.0f, 1.0f);
-					break;
-				default:
-					Log.d(RadioService.TAG, "Unknown phone state = "
-							+ state);
-				}
-			} catch (Exception e) {
-				Log.i("Exception", "PhoneStateListener() e = " + e);
-			}
-		}
-	};
-
-// /////////////////////////////////////////////////////
+    // ������� ������
+    private PhoneStateListener mPhoneListener = new PhoneStateListener() {
+        public void onCallStateChanged(int state, String incomingNumber) {
+            try {
+                switch (state) {
+                case TelephonyManager.CALL_STATE_RINGING:
+                    Log.d(TAG, "RINGING");
+                    if (player.isPlaying())
+                        player.pause();
+                    break;
+                case TelephonyManager.CALL_STATE_OFFHOOK:
+                    Log.d(TAG, "OFFHOOK");
+                    if (player.isPlaying())
+                        player.pause();
+                    break;
+                case TelephonyManager.CALL_STATE_IDLE:
+                    Log.d(TAG, "IDLE");
+                    if (player == null)
+                        initializeMediaPlayer();
+                    else if (!player.isPlaying())
+                        player.start();
+                    player.setVolume(1.0f, 1.0f);
+                    break;
+                default:
+                    Log.d(RadioService.TAG, "Unknown phone state = "
+                            + state);
+                }
+            } catch (Exception e) {
+                Log.w("Exception", "PhoneStateListener() e = " + e.getMessage());
+            }
+        }
+    };
 
 // /////////////////////////////////////////////////////
     @Override
@@ -385,13 +393,21 @@ public class RadioService extends Service implements OnInfoListener,
     @Override
     public boolean onError(MediaPlayer mp, int what, int extra) {
         if (what != -38) {
+            Log.d(TAG, "onError(): " + what);
             stopPlaying();
             if (Utils.checkInternetConnection(getApplicationContext())) {
                 initializeMediaPlayer();
                 if (what != 1){
                     startPlaying();
                 } else {
-                    sendMsgToActivity(SERVICE_STOPED);
+                    Message msg = Message.obtain(null, Constants.SERVICE_STOPED);
+                    try {
+                        Log.d(TAG, "Sending message STOP to activity");
+                        mActivityMessenger.send(msg);
+                    } catch (RemoteException e) {
+                        Log.w(TAG, "Error sending message to activity: " + e.getMessage());
+                    }
+//                    sendMsgToActivity(SERVICE_STOPED);
                     stopSelf();
                 }
             }
@@ -399,4 +415,6 @@ public class RadioService extends Service implements OnInfoListener,
         return false;
     }
     // /////////////////////////////////////////////////
+
+
 }
