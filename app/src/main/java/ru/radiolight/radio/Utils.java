@@ -51,4 +51,15 @@ public class Utils {
 		// }
 
 	}
+
+        static boolean isServiceRunning(Class<?> clazz, Context ctx){
+            ActivityManager mngr = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            for (RunningServiceInfo srvc : mngr.getRunningServices(Integer.MAX_VALUE)){
+	        if (clazz.getName().equals(srvc.service.getClassName())){
+                    return true;
+                }
+            }
+            return false;
+        }
+
 }
