@@ -2,5 +2,4 @@ build
 oldstructure
 .gradle
 *.iml
-local.properties
 import-summary.txt
