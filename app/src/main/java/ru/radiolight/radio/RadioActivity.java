@@ -536,7 +536,6 @@ public class RadioActivity extends Activity implements OnClickListener {
                         .setBackgroundResource(R.drawable.play_off_32x32);
                 buttonStopPlay.setBackgroundResource(R.drawable.stop_on);
                 PLAY = true;
-                Utils.updateWidget(this, Constants.RADIO_STARTED);
             }
         }
     }
@@ -554,7 +553,6 @@ public class RadioActivity extends Activity implements OnClickListener {
             buttonStartPlay.setBackgroundResource(R.drawable.play_on_32x32);
             if (streamToPlay == -1)
                 startServiseIntent = null;
-            Utils.updateWidget(this, Constants.RADIO_STOPED);
         }
     }
 
