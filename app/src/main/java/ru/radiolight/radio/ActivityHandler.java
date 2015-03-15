@@ -2,6 +2,7 @@ package ru.radiolight.radio;
 
 import android.os.Handler;
 import android.os.Message;
+import android.util.Log;
 
 public class ActivityHandler extends Handler {
 
@@ -13,6 +14,7 @@ public class ActivityHandler extends Handler {
 
     @Override
     public void handleMessage(Message msg) {
+        Log.d(ActivityHandler.class.getName(), "handleMessage");
         switch(msg.what){
         case Constants.UPDATE_TITLE:
             String title = (String) msg.obj;

@@ -15,10 +15,11 @@ import android.media.MediaPlayer.OnErrorListener;
 import android.media.MediaPlayer.OnInfoListener;
 import android.media.MediaPlayer.OnPreparedListener;
 import android.os.Binder;
+import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Messenger;
-import android.os.Parcelable;
 import android.os.PowerManager;
 import android.os.RemoteException;
 import android.telephony.PhoneStateListener;
@@ -44,20 +45,21 @@ public class RadioService extends Service implements OnInfoListener,
     private TelephonyManager tm;
     private Context mContext;
 
-    MyBinder binder = new MyBinder();
-    private Messenger mActivityMessenger;
+    MyBinder mBinder = new MyBinder();
 
     static final int NOTIFICATION_ID = 1;
 
 // ////////////////////
     @Override
-    public IBinder onBind(Intent arg0) {
+    public IBinder onBind(Intent intent) {
         // int flag = arg0.getFlags();
         // Toast.makeText(this, "flags = " + flag, Toast.LENGTH_SHORT).show();
-        return binder;
+        mUpdateMeta = true;
+        return mBinder;
     }
 
     class MyBinder extends Binder {
+
         RadioService getService() {
             return RadioService.this;
         }
@@ -71,37 +73,48 @@ public class RadioService extends Service implements OnInfoListener,
         mContext = getApplicationContext();
         tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
         tm.listen(mPhoneListener, PhoneStateListener.LISTEN_CALL_STATE);
+
+        mServiceMessenger = new Messenger(mServiceHandler);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-     // Notification starts
-        initNotification();
-
-        mActivityMessenger = intent.getParcelableExtra(Constants.ACTIVITY_MESSENGER);
-
-        stream = intent.getFlags();
-        Log.i(TAG, "onStart , stream = " + stream);
-        if ((stream != 0)) {
-            initializeMediaPlayer();
-            Log.i(TAG, "Initialized ");
-            if (Utils.checkInternetConnection(getApplicationContext())){
-                startPlaying();
-                getMetaSendMsg();
-            }
-        }
+        Log.d(TAG, "onStartCommand");
+    // Notification starts
+        initService(intent);
         // the START_STICKY return value will ensure
         // that the service stays running until you call
         // stopService() from our activity.
         return START_NOT_STICKY;
     }
 
+    void initService(Intent intent){
+        initNotification();
+
+//        Messenger messenger = intent.getParcelableExtra(Constants.ACTIVITY_MESSENGER);
+//        if (messenger != null) {
+//            mActivityMessenger = messenger;
+//        }
+
+        stream = intent.getFlags();
+        Log.d(TAG, "onStart , stream = " + stream);
+        if ((stream != 0)) {
+            initializeMediaPlayer();;
+            if (Utils.checkInternetConnection(getApplicationContext())){
+                startPlaying();
+                getMetaSendMsg();
+            }
+        }
+    }
+
     @Override
     public void onDestroy() {
-        Log.i(TAG, "onDestroy");
+        Log.d(TAG, "onDestroy");
         super.onDestroy();
         stopPlaying();
         cancelNotification();
+
+        mServiceHandler.removeCallbacks(updateMetaRunnable);
 
         IS_PLAYING = false;
         if (mPhoneListener != null){
@@ -139,7 +152,7 @@ public class RadioService extends Service implements OnInfoListener,
     }
 
     private void updateNotification(){
-        Log.i(TAG, "updateNotification()");
+        Log.d(TAG, "updateNotification");
     }
 
     private void cancelNotification() {
@@ -148,7 +161,7 @@ public class RadioService extends Service implements OnInfoListener,
 
     // ///////////////////////////////////////////////////////////////////////////////////////////////
     private void initializeMediaPlayer() {
-        Log.i(TAG, "creating player, stream = " + stream);
+        Log.d(TAG, "creating player, stream = " + stream);
         if (player != null) {
             player = null;
         }
@@ -160,19 +173,19 @@ public class RadioService extends Service implements OnInfoListener,
         try {
             switch (stream) {
             case RadioActivity.SVET:
-                Log.i(TAG, "Started Svet : ");
+                Log.d(TAG, "Started Svet : ");
                 // The url to the shoutcast stream
                 player.setDataSource(Constants.URL_SVET);
                 URL_PLAYING = Constants.URL_SVET;
                 break;
             case RadioActivity.SVOBODA:
-                Log.i(TAG, "Started Svoboda : ");
+                Log.d(TAG, "Started Svoboda : ");
                 // The url to the shoutcast stream
                 player.setDataSource(Constants.URL_SVOBODA);
                 URL_PLAYING = Constants.URL_SVOBODA;
                 break;
             case RadioActivity.MIR:
-                Log.i(TAG, "Started Mir : ");
+                Log.d(TAG, "Started Mir : ");
                 // The url to the shoutcast stream
                 player.setDataSource(Constants.URL_MIR);
                 URL_PLAYING = Constants.URL_MIR;
@@ -193,7 +206,10 @@ public class RadioService extends Service implements OnInfoListener,
 
             public void onPrepared(MediaPlayer mediaPlayer) {
                 if (mediaPlayer != null){
-                    mediaPlayer.start();//player.start();
+                    mediaPlayer.start();
+                    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT) {
+                        mServiceHandler.postDelayed(updateMetaRunnable, 1000);
+                    }
                 } else {
                     Log.w(TAG, "Error: mediaPlayer is null");
                 }
@@ -203,7 +219,7 @@ public class RadioService extends Service implements OnInfoListener,
         player.setOnBufferingUpdateListener(new OnBufferingUpdateListener() {
 
             public void onBufferingUpdate(MediaPlayer mediaPlayer, int percent) {
-                Log.i(TAG, " Player is buffering : " + percent);
+                Log.d(TAG, "buffering: " + percent);
                 timer++;
                 if (timer == TIMER_LIMIT) {
                     getMetaSendMsg();
@@ -217,8 +233,18 @@ public class RadioService extends Service implements OnInfoListener,
         });
     }
 
+    //final boolean updating = false;
+
+    Runnable updateMetaRunnable = new Runnable() {
+        @Override
+        public void run() {
+            getMetaSendMsg();
+            mServiceHandler.sendEmptyMessage(Constants.UPDATE_META);
+        }
+    };
+
     void getMetaSendMsg(){
-        Log.i(TAG, "getMetaSendMsg()");
+        Log.d(TAG, "getMetaSendMsg");
         Thread t = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -226,12 +252,15 @@ public class RadioService extends Service implements OnInfoListener,
                     mArtistTitle = GetMetaData.getMeta(URL_PLAYING);
                     Message msg = Message.obtain(null, Constants.UPDATE_TITLE);
                     msg.obj = mArtistTitle;
-                    mActivityMessenger.send(msg);
-//                    sendMsgToActivity(mArtistTitle);
-                    //Log.i(TAG, "CURENT RESOURCE: " + mArtistTitle);
+                    if (null != mActivityMessenger && mUpdateMeta) {
+                        Log.d(TAG, "sending message to activity: " + mActivityMessenger);
+                        mActivityMessenger.send(msg);
+                    }
+                    //Log.d(TAG, "CURENT RESOURCE: " + mArtistTitle);
                 } catch (IOException e) {
                     Log.w(TAG,"getMetaSendMsg() Error: " + e.getMessage());
-                } catch (RemoteException e) {
+                }
+                catch (RemoteException e) {
                     // TODO Auto-generated catch block
                     Log.w(TAG, "Error sending message to update title: " + e.getMessage());
                 }
@@ -239,17 +268,8 @@ public class RadioService extends Service implements OnInfoListener,
         });
         t.start();
     }
-    // ///////////////////////////////////
-    /*
-    void sendMsgToActivity(String msg){
-        Intent intnt = new Intent("android.intent.action.MAIN");
-        intnt.putExtra("msg", msg);
-        this.sendBroadcast(intnt);
-    }
-    */
 
     void startPlaying() {
-        // this.stopPlaying();
         AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         int audioFocus = audioManager.requestAudioFocus(this,
                 AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
@@ -257,10 +277,10 @@ public class RadioService extends Service implements OnInfoListener,
             try {
                 IS_PLAYING = true;
                 player.prepareAsync();
-                player.start();
+                //player.start();
 
             } catch (IllegalStateException e) {
-                Log.i(TAG, "exception startPlaying()");
+                Log.w(TAG, "Could not start player");
                 e.printStackTrace();
             } catch (IllegalArgumentException e) {
                 e.printStackTrace();
@@ -294,17 +314,10 @@ public class RadioService extends Service implements OnInfoListener,
         return IS_PLAYING;
     }
 
-   /*
-    protected String getTitle(){
-        Log.i(TAG, "getTitle() " + mArtistTitle);
-        return mArtistTitle;
-    }
-    */
-
     @Override
     public void onAudioFocusChange(int focusChange) {
         // if (focusChange > 0)
-        Log.i(TAG, "focusChanged = " + focusChange);
+        Log.d(TAG, "focusChanged " + focusChange);
         switch (focusChange) {
         case AudioManager.AUDIOFOCUS_GAIN:
             // Toast.makeText(this, "Focus gained" , Toast.LENGTH_LONG).show();
@@ -334,7 +347,7 @@ public class RadioService extends Service implements OnInfoListener,
         case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
             // Lost focus for a short time, but it's ok to keep playing
             // at an attenuated level
-            Log.i(TAG, "AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK");
+            Log.d(TAG, "AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK");
             if (player.isPlaying())
                 player.setVolume(0.1f, 0.1f);
             break;
@@ -401,12 +414,14 @@ public class RadioService extends Service implements OnInfoListener,
                     startPlaying();
                 } else {
                     Message msg = Message.obtain(null, Constants.SERVICE_STOPED);
+                    /*
                     try {
                         Log.d(TAG, "Sending message STOP to activity");
-                        mActivityMessenger.send(msg);
+                        //mActivityMessenger.send(msg);
                     } catch (RemoteException e) {
                         Log.w(TAG, "Error sending message to activity: " + e.getMessage());
                     }
+                    */
 //                    sendMsgToActivity(SERVICE_STOPED);
                     stopSelf();
                 }
@@ -417,4 +432,40 @@ public class RadioService extends Service implements OnInfoListener,
     // /////////////////////////////////////////////////
 
 
+    private Messenger mServiceMessenger;
+    private Messenger mActivityMessenger ;
+    private ServiceHandler mServiceHandler = new ServiceHandler();
+    private boolean mUpdateMeta = false;
+
+    Messenger getMessenger() {return mServiceMessenger; }
+
+    private class ServiceHandler extends Handler {
+
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what){
+                case Constants.UPDATE_META:
+                    if (isPlaying() && mUpdateMeta){
+                        removeCallbacks(updateMetaRunnable);
+                        postDelayed(updateMetaRunnable, Constants.UPDATE_META_DELAY);
+                    }
+                    break;
+                case Constants.MESSAGE_SERVICE_CONNECTION:
+                    Log.d(TAG, "ServiceHandler: handleMessage() target = " + msg.replyTo);
+                    mActivityMessenger = null;
+                    mActivityMessenger = msg.replyTo;
+                    Message m = Message.obtain(null, Constants.UPDATE_TITLE);
+                    msg.obj = mArtistTitle;
+                    Log.d(TAG, "trying to send message to activity: " + mActivityMessenger);
+                    try {
+                        mActivityMessenger.send(m);
+                    } catch (Exception e) {
+                    }
+                    break;
+                case Constants.ACTIVITY_STOPED:
+                    mUpdateMeta = false;
+                    break;
+            }
+        }
+    }
 }

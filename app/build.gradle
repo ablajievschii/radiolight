@@ -14,11 +14,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
-	    applicationVariants.all { variant ->
-    	        variant.outputs.each { output ->
-		    output.outputFile = file("$project.buildDir/outputs/apk/RadioLight_${output.name}.apk")
-		}
-	    }
+            applicationVariants.all { variant ->
+                variant.outputs.each { output ->
+                    output.outputFile = file("$project.buildDir/outputs/apk/RadioLight_${output.name}.apk")
+                }
+            }
         }
     }
 

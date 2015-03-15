@@ -14,7 +14,9 @@ import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.Message;
 import android.os.Messenger;
+import android.os.RemoteException;
 import android.util.Log;
 import android.view.Display;
 import android.view.KeyEvent;
@@ -58,19 +60,56 @@ public class RadioActivity extends Activity implements OnClickListener {
     private Button buttonHome, buttonLang, buttonFacebook, buttonTwitter, buttonVkontakte;
     private TextView mTvSong;
 
-    AudioManager mAudioManager;
+    private AudioManager mAudioManager;
     int maxVolume, mCurVolume, mBeforeMuteVolume = 0;
-    SeekBar mVolumeSeekBar;
+    private SeekBar mVolumeSeekBar;
 
-    Intent startServiseIntent = null;
-    Intent browserIntent = null;
-    ServiceConnection sConn;
-    RadioService mRadioService;
-    boolean bound = false;
+    private Intent startServiceIntent = null;
+    private Intent browserIntent = null;
+    private RadioService mRadioService;
+    boolean mBound = false;
 
-    // message from service
-//    private BroadcastReceiver mReceiver;
-    private final Messenger mActivityMessenger = new Messenger(new ActivityHandler(this));
+    private ActivityHandler mActivityHandler = new ActivityHandler(this);
+    private Messenger mActivityMessenger = new Messenger(mActivityHandler);
+
+
+    private ServiceConnection sConn = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            // TODO Auto-generated method stub
+            Log.d(TAG, "onServiceConnected: mActivityMessenger = " + mActivityMessenger);
+
+            RadioService.MyBinder serviceBinder = ((RadioService.MyBinder) binder);
+            mRadioService = serviceBinder.getService();
+            PLAY = mRadioService.isPlaying();
+            Message msg = Message.obtain(null,Constants.MESSAGE_SERVICE_CONNECTION);
+            msg.replyTo = mActivityMessenger;
+            try {
+                mRadioService.getMessenger().send(msg);
+            } catch (RemoteException ex){
+                Log.w(TAG, "no connection to service");
+            }
+
+            Log.d(TAG, "isPlaying = " + PLAY);
+            if (PLAY)
+                buttonStartPlay
+                        .setBackgroundResource(R.drawable.play_off_32x32);
+            streamToPlay = RadioService.stream;
+            changeColor(streamToPlay);
+
+            mBound = true;
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            // TODO Auto-generated method stub
+            Log.d(TAG, "onServiceDisconnected ");
+            Log.d(TAG, "isPlaying = " + PLAY);
+            mBound = false;
+        }
+
+    };
 
     private final static int FONT_SIZE_SMALL = 24;
 
@@ -80,7 +119,7 @@ public class RadioActivity extends Activity implements OnClickListener {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        Log.i(TAG, "onCreate Activity");
+        Log.d(TAG, "onCreate");
         // Log.i("MAXMEMORY","max memory = "+Runtime.getRuntime().maxMemory());
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -90,8 +129,6 @@ public class RadioActivity extends Activity implements OnClickListener {
         setContentView(R.layout.main);
 
         initializeUIElements();
-
-        setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
         initializeVolumeControls();
 
@@ -115,11 +152,6 @@ public class RadioActivity extends Activity implements OnClickListener {
             moveTaskToBack(true);
             System.runFinalizersOnExit(true);
             System.exit(0);
-            //
-            // Intent startMain = new Intent(Intent.ACTION_MAIN);
-            // startMain.addCategory(Intent.CATEGORY_HOME);
-            // startMain.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            // startActivity(startMain);
         }
         return true;
     }
@@ -149,7 +181,7 @@ public class RadioActivity extends Activity implements OnClickListener {
 
     @Override
     protected void onPause() {
-        Log.i(TAG, "onPause Activity");
+        Log.d(TAG, "onPause");
         if (!PLAY) {
             finish();
         }
@@ -165,25 +197,25 @@ public class RadioActivity extends Activity implements OnClickListener {
 
     @Override
     protected void onStop() {
-        Log.i(TAG, "onStop Activity");
         super.onStop();
+        Log.d(TAG, "onStop");
+        Message msg = Message.obtain(null,Constants.ACTIVITY_STOPED);
+        try {
+            mRadioService.getMessenger().send(msg);
+        } catch (RemoteException ex){
+            Log.w(TAG, "no connection to service");
+        }
+        unbind();
     }
 
     @Override
     protected void onDestroy(){
-        unbind();
         super.onDestroy();
     }
 
     @Override
-    protected void onStart() {
-        Log.i(TAG, "onStart Activity");
-        super.onStart();
-    }
-
-    @Override
     protected void onResume() {
-        Log.i(TAG, "onResume Activity");
+        Log.d(TAG, "onResume");
         int volume = mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         setSeekBarVolume(volume);
         if (volume == 0) {
@@ -194,48 +226,15 @@ public class RadioActivity extends Activity implements OnClickListener {
 
         boolean serviceRunning = Utils.isServiceRunning(RadioService.class, this);
         PLAY = serviceRunning;
-//        if (serviceRunning){
         Log.d(TAG, "ServiceRunning: " + serviceRunning);
-//        }
-
-        sConn = new ServiceConnection() {
-
-            @Override
-            public void onServiceConnected(ComponentName name, IBinder binder) {
-                // TODO Auto-generated method stub
-                Log.i(TAG, "onServiceConnected");
-                mRadioService = ((RadioService.MyBinder) binder).getService();
-                PLAY = mRadioService.isPlaying();
-                Log.i(TAG, "isPlaying = " + PLAY);
-                if (PLAY)
-                    buttonStartPlay
-                            .setBackgroundResource(R.drawable.play_off_32x32);
-                streamToPlay = RadioService.stream;
-                changeColor(streamToPlay);
-
-                bound = true;
-
-            }
-
-            @Override
-            public void onServiceDisconnected(ComponentName name) {
-                // TODO Auto-generated method stub
-                Log.i(TAG, "onServiceDisconnected ");
-                Log.i(TAG, "isPlaying = " + PLAY);
-                unbind();
-            }
-
-        };
-        // Toast.makeText(RadioAvtivity.this, "PLAY = " + PLAY,
-        // Toast.LENGTH_SHORT).show();
-//        if (PLAY) {
-        bindService(new Intent(getApplicationContext(), RadioService.class),
-                    sConn, 0);
-//        } else {
         if (!serviceRunning){
             buttonStartPlay.setBackgroundResource(R.drawable.play_on_32x32);
             buttonStopPlay.setBackgroundResource(R.drawable.stop_off);
         } else {
+            Intent bindToServiceIntent = new Intent(this, RadioService.class);
+            //bindToServiceIntent.putExtra(Constants.ACTIVITY_MESSENGER, mActivityMessenger);
+            bindService(bindToServiceIntent, sConn, 0);
+
             buttonStartPlay.setBackgroundResource(R.drawable.play_off_32x32);
             buttonStopPlay.setBackgroundResource(R.drawable.stop_on);
         }
@@ -243,6 +242,8 @@ public class RadioActivity extends Activity implements OnClickListener {
     }
 
     private void initializeVolumeControls() {
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+
         if (null == mAudioManager) mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         maxVolume = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         mCurVolume = mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
@@ -283,7 +284,7 @@ public class RadioActivity extends Activity implements OnClickListener {
                     }
                 }
             });
-	}
+    }
 
     private void setSeekBarVolume(int volume){
         Log.d(TAG, "setSeekBarVolume " + volume);
@@ -361,7 +362,7 @@ public class RadioActivity extends Activity implements OnClickListener {
     @SuppressWarnings("deprecation")
     private void setBackground() {
         Display disp = getWindowManager().getDefaultDisplay();
-        Log.i("Resolution",
+        Log.d("Resolution",
                 "width = " + disp.getWidth() + "; height = " + disp.getHeight());
         llLogo.setLayoutParams(new LayoutParams(disp.getWidth() - 20, disp
                 .getWidth() - 20));
@@ -381,18 +382,19 @@ public class RadioActivity extends Activity implements OnClickListener {
                 && v.getId() != R.id.buttonVkontakte
                 && v.getId() != R.id.buttonLang)
             // bindService(startServiseIntent, null, 0);
+        {
             if ((PLAY && v.getId() != R.id.buttonStartPlay)) {
                 buttonStopPlay.setBackgroundResource(R.drawable.stop_off);
-                startServiseIntent = new Intent(RadioActivity.this,
-                        RadioService.class);
-                startServiseIntent.setFlags(-1);
-                stopService(startServiseIntent);
+                startServiceIntent = new Intent(RadioActivity.this, RadioService.class);
+                startServiceIntent.setFlags(-1);
+                stopService(startServiceIntent);
                 // Toast.makeText(this, "stoped", Toast.LENGTH_SHORT).show();
             }
+        }
 
         switch (v.getId()) {
         case R.id.buttonSvet:
-            Log.i(TAG, "service ���� choosed");
+            Log.d(TAG, "service Svet chosen");
             streamToPlay = SVET;
             URL_PLAY = Constants.URL_SVET;
             PLAY = false;
@@ -402,7 +404,7 @@ public class RadioActivity extends Activity implements OnClickListener {
             //
             break;
         case R.id.buttonSvoboda:
-            Log.i(TAG, "service ������� choosed");
+            Log.d(TAG, "service Svoboda chosen");
             streamToPlay = SVOBODA;
             URL_PLAY = Constants.URL_SVOBODA;
             PLAY = false;
@@ -412,7 +414,7 @@ public class RadioActivity extends Activity implements OnClickListener {
             //
             break;
         case R.id.buttonMir:
-            Log.i(TAG, "service ��� choosed");
+            Log.d(TAG, "service Mir chosen");
             streamToPlay = MIR;
             URL_PLAY = Constants.URL_MIR;
             PLAY = false;
@@ -521,21 +523,24 @@ public class RadioActivity extends Activity implements OnClickListener {
 
     // ////////////////////////////////////////////////////////
     private void startPlay() {
-        Log.i(TAG, "startPlay()");
+        Log.d(TAG, "startPlay");
         if (!PLAY
             && Utils.checkInternetConnection(getApplicationContext())) {
-            Log.i(TAG, "was not playing");
+            Log.d(TAG, "was not playing");
             if (streamToPlay != -1) {
                 mTvSong.setText("-");
-                startServiseIntent = new Intent(RadioActivity.this,
+                startServiceIntent = new Intent(RadioActivity.this,
                         RadioService.class);
-                startServiseIntent.setFlags(streamToPlay);
-                startServiseIntent.putExtra(Constants.ACTIVITY_MESSENGER, mActivityMessenger);
-                startService(startServiseIntent);
+                startServiceIntent.setFlags(streamToPlay);
+                //startServiseIntent.putExtra(Constants.ACTIVITY_MESSENGER, mActivityMessenger);
+                startService(startServiceIntent);
+                bindService(startServiceIntent, sConn, 0);
                 buttonStartPlay
                         .setBackgroundResource(R.drawable.play_off_32x32);
                 buttonStopPlay.setBackgroundResource(R.drawable.stop_on);
                 PLAY = true;
+            } else {
+                Log.w(TAG, "no stream selected to play");
             }
         }
     }
@@ -543,31 +548,31 @@ public class RadioActivity extends Activity implements OnClickListener {
     protected void stopPlay() {
         if (PLAY) {
             Log.d(TAG, "stopPlay()");
-            if (startServiseIntent == null) {
-                startServiseIntent = new Intent(RadioActivity.this,
+            if (startServiceIntent == null) {
+                startServiceIntent = new Intent(RadioActivity.this,
                      RadioService.class);
             }
-            stopService(startServiseIntent);
+            stopService(startServiceIntent);
             buttonStopPlay.setBackgroundResource(R.drawable.stop_off);
             PLAY = false;
             buttonStartPlay.setBackgroundResource(R.drawable.play_on_32x32);
             if (streamToPlay == -1)
-                startServiseIntent = null;
+                startServiceIntent = null;
         }
     }
 
     protected void updateTitle(String title){
-        if (mRadioService != null){
-            Log.d(TAG, "updateTitle(): " + title);
+        Log.d(TAG, "updateTitle(): " + title);
+        if (mRadioService != null && !mTvSong.getText().equals(title)){
             mTvSong.setText(title);
         }
     }
 
     private void unbind() {
-        if (null != sConn && bound) {
+        Log.d(TAG, "unbind: " + mBound);
+        if (mBound) {
             unbindService(sConn);
-            sConn = null;
-            bound = false;
+            mBound = false;
         }
     }
 
